@@ -82,8 +82,47 @@ qui reg logc i.year##(i.educ i.race /*i.empst*/ i.region) /*i.age#i.educ */ i.yb
 qui predict uc if e(sample), res
 */
 
-//METHOD 2: FRACTIONAL POLYNOMIALS 
+//METHOD 2: HP FILTER
 
+/*
+sort educ race age
+collapse logy logc, by(educ race age)
+gen raceduc = race*10+educ
+tsset raceduc age
+tsfilter hp clogy clogc = logy logc, smooth(100) trend(hlogy hlogc)
+twoway (connected logc age if educ==3 & race==1) ///
+		(connected logc age if educ==2 & race==1) ///
+		(connected hlogc age if educ==3 & race==1) ///
+		(connected hlogc age if educ==2 & race==1), name(hp_cons)
+twoway (connected logy age if educ==3 & race==1) ///
+		(connected logy age if educ==2 & race==1) ///
+		(connected hlogy age if educ==3 & race==1) ///
+		(connected hlogy age if educ==2 & race==1), name(hp_income)
+gen dhlogy = D.hlogy
+gen dlogy = D.logy
+twoway (connected dlogy age if educ==3 & race==1) ///
+		(connected dlogy age if educ==2 & race==1) ///
+		(connected dhlogy age if educ==3 & race==1) ///
+		(connected dhlogy age if educ==2 & race==1), name(hp_dy)
+drop raceduc logy logc clogy clogc
+sort educ race age
+save profile, replace
+
+use temp, clear
+sort educ race age
+merge educ race age using profile
+erase profile.dta
+tab _merge
+gen lhy = logy - hlogy
+qui reg lhy i.year
+qui predict uy if e(sample), res
+qui reg logc i.year
+qui predict uc if e(sample), res
+*/
+
+//METHOD 3: FRACTIONAL POLYNOMIALS 
+
+/*
 u temp, clear
 set more off
 xi i.year
@@ -145,8 +184,9 @@ gen uy = logy - fplogye
 qui reg logc i.year
 qui predict uc if e(sample), res
 *gen uc = logc - fplogc
+*/
 
-//METHOD 3: PARTIALLY LINEAR MODEL (Villaverde-Krueger 2004)
+//METHOD 4: PARTIALLY LINEAR MODEL (Villaverde-Krueger 2004)
 use temp, clear
 
 //logy: create selectvar and controls
@@ -160,7 +200,7 @@ cap program drop semiparpl
 program semiparpl 
 	syntax varlist(min=3 numeric) [if] [in] , [h(real 5) Predict(namelist min=2 max=2)]
 	local nv: word count `varlist'
-	
+
 
 	mata
 	
