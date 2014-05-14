@@ -187,68 +187,133 @@ qui predict uc if e(sample), res
 */
 
 //METHOD 4: PARTIALLY LINEAR MODEL (Villaverde-Krueger 2004)
-use temp, clear
 
+//PARLIN: estimate y = m(z) + Xb + e (semiparametrics; epanechnikov kernel)
+
+cap mata mata drop parlin()
+mata 
+function parlin(yvar,nonparvar,xvars,touse,nonpar,fitted)
+{	
+  st_view(y   =0,.,yvar,touse) //dependent var: can be anything
+  st_view(z   =0,.,nonparvar,touse) //nonpar argument: integer variable
+  st_view(X   =0,.,xvars,touse) //controls: can be anything
+  
+  minZ = min(z)
+  maxZ = max(z)
+  nZ   = max(z)-min(z)+1
+  
+  nObs = rows(y)
+  S = J(nZ,nObs,.)
+  h = 5
+  
+  for(i=1; i<=nZ; i++) {
+  for(j=1; j<=nObs; j++) {
+  u = min((abs(minZ+i-1-z[j])/h,1))
+  S[i,j]=(.75/h)*(1-u^2) 
+  }
+  }
+  
+  yTildeGrid = (S*y):/(S*J(nObs,1,1))
+  XTildeGrid = (S*X):/(S*J(nObs,1,1))
+  
+  yResid = J(nObs,1,.)
+  XResid = J(nObs, cols(X),.)
+  for(j=1; j<=nObs; j++) {
+    yResid[j] = y[j] - yTildeGrid[z[j]-minZ+1]
+    XResid[j,.]  = X[j,.]  - XTildeGrid[z[j]-minZ+1,.]
+  }
+  
+  bHat = invsym(XResid'*XResid)*XResid'*yResid
+  yZGrid = (S*(y - X*bHat)):/(S*J(nObs,1,1))
+  
+  yZ = J(nObs,1,.)
+  for(j=1; j<=nObs; j++) {
+    yZ[j] = yZGrid[z[j]-minZ+1]
+  }
+  
+  yHat = yZ + X*bHat
+  
+  st_addvar("double",nonpar)
+  st_addvar("double",fitted)
+  st_store(.,nonpar,touse,yZ)
+  st_store(.,fitted,touse,yHat)
+}
+mata mosave parlin(),replace	
+end
+
+use temp, clear
 //logy: create selectvar and controls
 gen touse =!missing(logy*age*year)
 tab year if logy <., gen(yrd)
 drop yrd1
+*mata: parlin("logy","age","yrd*","touse","logyAge","logyHat")
 
-//USE Epanechnikov kernel
+//empst-nonresticed, three education groups: logy
+replace touse = !missing(logy*age*year)&educ==3
+mata: parlin("logy","age","yrd*","touse","logyAge","logyHat")
+replace touse = !missing(logy*age*year)&educ==2
+mata: parlin("logy","age","yrd*","touse","tempA2","tempH2")
+replace touse = !missing(logy*age*year)&educ==1
+mata: parlin("logy","age","yrd*","touse","tempA1","tempH1")
+replace logyAge = tempA2 if educ==2
+replace logyAge = tempA1 if educ==1
+replace logyHat = tempH2 if educ==2
+replace logyHat = tempH1 if educ==1
+drop tempA* tempH*
 
-cap program drop semiparpl
-program semiparpl 
-	syntax varlist(min=3 numeric) [if] [in] , [h(real 5) Predict(namelist min=2 max=2)]
-	local nv: word count `varlist'
+//empst-resticed, three education groups: logy
+replace touse = !missing(logy*age*year)&educ==3&empst==1
+mata: parlin("logy","age","yrd*","touse","logyEAge","logyEHat")
+replace touse = !missing(logy*age*year)&educ==2&empst==1
+mata: parlin("logy","age","yrd*","touse","tempA2","tempH2")
+replace touse = !missing(logy*age*year)&educ==1&empst==1
+mata: parlin("logy","age","yrd*","touse","tempA1","tempH1")
+replace logyEAge = tempA2 if educ==2
+replace logyEAge = tempA1 if educ==1
+replace logyEHat = tempH2 if educ==2
+replace logyEHat = tempH1 if educ==1
+drop tempA* tempH*
 
+drop yrd*
+tab year if logc <., gen(yrd)
+drop yrd1
 
-	mata
-	
-	st_view(y   =0,.,"logy","touse") //dependent var: can be anything
-	st_view(z   =0,.,"age", "touse") //nonpar argument: integer variable
-	st_view(X   =0,.,"yrd*","touse") //controls: can be anything
-	
-	minZ = min(Z)
-	maxZ = max(Z)
-	nZ   = max(Z)-min(Z)+1
-	
-	nObs = rows(y)
-	S = J(nZ,nObs,.)
-	h = 5
-	
-	for(i=1; i<=nZ; i++) {
-	for(j=1; j<=nObs; j++) {
-	u = min((abs(minZ+i-1-z[j])/h,1))
-	S[i,j]=(.75/h)*(1-u^2) 
-	}
-	}
-	
-	yTildeGrid = (S*y):/(S*J(nObs,1,1))
-	XTildeGrid = (S*X):/(S*J(nObs,1,1))
-	
-	yResid = J(nObs,1,.)
-	XResid = J(nObs, cols(X),.)
-	for(j=1; j<=nObs; j++) {
-	  yResid[j] = y[j] - yTildeGrid[z[j]-minZ+1]
-	  XResid[j,.]  = X[j,.]  - XTildeGrid[z[j]-minZ+1,.]
-	}
-	
-	bHat = invsym(XResid'*XResid)*XResid'*yResid
-	yZGrid = (S*(y - X*bHat)):/(S*J(nObs,1,1))
-	
-	yZ = J(nObs,1,.)
-	for(j=1; j<=nObs; j++) {
-	  yZ[j] = yZGrid[Z[j]-minZ+1]
-	}
-	
-	yHat = yZ + X*bHat
-	
-	st_addvar("double","logyAge")
-	st_addvar("double","logyHat")
-	st_store(.,"logyAge","touse",yZ)
-	st_store(.,"logyHat","touse",yHat)
-	
-	end
+//empst-nonresticed, three education groups: logc
+replace touse = !missing(logc*age*year)&educ==3
+mata: parlin("logc","age","yrd*","touse","logcAge","logcHat")
+replace touse = !missing(logc*age*year)&educ==2
+mata: parlin("logc","age","yrd*","touse","tempA2","tempH2")
+replace touse = !missing(logc*age*year)&educ==1
+mata: parlin("logc","age","yrd*","touse","tempA1","tempH1")
+replace logcAge = tempA2 if educ==2
+replace logcAge = tempA1 if educ==1
+replace logcHat = tempH2 if educ==2
+replace logcHat = tempH1 if educ==1
+drop tempA* tempH*
+
+//empst-resticed, three education groups: logc
+replace touse = !missing(logc*age*year)&educ==3&empst==1
+mata: parlin("logc","age","yrd*","touse","logcEAge","logcEHat")
+replace touse = !missing(logc*age*year)&educ==2&empst==1
+mata: parlin("logc","age","yrd*","touse","tempA2","tempH2")
+replace touse = !missing(logc*age*year)&educ==1&empst==1
+mata: parlin("logc","age","yrd*","touse","tempA1","tempH1")
+replace logcEAge = tempA2 if educ==2
+replace logcEAge = tempA1 if educ==1
+replace logcEHat = tempH2 if educ==2
+replace logcEHat = tempH1 if educ==1
+drop tempA* tempH*
+
+drop yrd*
+
+gen uy = logy - logyHat
+*gen uy = logy - logyEHat
+
+qui reg logc i.year
+qui predict uc if e(sample), res
+*gen uc = logc - logcEHat
+*gen uc = logc - logcHat
+
 //OPTION A1: ADJUST LOG CONSUMPTION BY EQUIVALENCE SCALE (CANNOT USE WITH METHOD 1)
 
 
@@ -260,7 +325,7 @@ program semiparpl
 
 ************PREPARING FOR AGE HETEROGENEITY IN CONS INSUR************
 
-
+*drop if empst>1
 qui tsset person year
 qui gen duc = D.uc
 qui gen duy = D.uy
@@ -284,7 +349,6 @@ gen rage = .
 
 *************Age profile of consumption insurance******************
 set more off
-*drop if empst!=1
 
 forvalues i=27/62 {
 	qui local j = `i'+1
@@ -307,6 +371,7 @@ forvalues i=27/62 {
 	qui cap drop  duyolderthan`i' ivpermolderthan`i' duyyoungerthan`j' ivpermyoungerthan`j'
 }
 
+graph drop _all
 twoway 	(connected rphi_gt_rage rage if rage<60) ///
 	(connected rphi_le_rage rage if rage<60) ///
 	(connected rphi_at_rage rage if rage<62), name(age)
